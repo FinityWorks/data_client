@@ -1,194 +1,38 @@
-from starlette.applications import Starlette
-from starlette.middleware.cors import CORSMiddleware
-from starlette.responses import JSONResponse
-from starlette.routing import Route
+from fastapi import FastAPI, WebSocket
+from fin_tools.aggregations import BarMaker
+from fin_tools.clients import Binance
+from fin_tools.formatting import df_to_dict
 
-app = Starlette()
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # set to '*' to allow all origins
-    allow_methods=["*"],  # set to '*' to allow all methods
-    allow_headers=["*"],  # set to '*' to allow all headers
-)
-
-test_tick_bars = {
-    "bars": {
-        "x": [
-            0,
-            1,
-            2,
-            3,
-            4,
-            5,
-            6,
-            7,
-            8,
-            9,
-            10,
-            11,
-            12,
-            13,
-            14,
-            15,
-            16,
-            17,
-            18,
-            19,
-            20,
-            21,
-            22,
-            23,
-        ],
-        "open": [
-            29291.31,
-            29292.51,
-            29292.26,
-            29293.39,
-            29294.51,
-            29295.07,
-            29291.36,
-            29290.45,
-            29289.1,
-            29285.05,
-            29282.84,
-            29284.16,
-            29285.92,
-            29287.43,
-            29290.84,
-            29284.74,
-            29281.72,
-            29278.0,
-            29276.8,
-            29276.2,
-            29277.28,
-            29279.06,
-            29280.46,
-            29279.24,
-        ],
-        "high": [
-            29292.5,
-            29292.51,
-            29293.33,
-            29294.28,
-            29294.95,
-            29300.0,
-            29291.36,
-            29290.85,
-            29290.85,
-            29285.05,
-            29284.1,
-            29285.1,
-            29287.42,
-            29290.59,
-            29290.85,
-            29284.74,
-            29286.08,
-            29278.0,
-            29276.8,
-            29277.27,
-            29278.46,
-            29279.97,
-            29282.04,
-            29279.24,
-        ],
-        "low": [
-            29291.3,
-            29292.27,
-            29291.45,
-            29293.39,
-            29294.51,
-            29292.46,
-            29290.79,
-            29289.34,
-            29286.03,
-            29282.85,
-            29282.84,
-            29284.16,
-            29285.92,
-            29282.84,
-            29285.53,
-            29281.73,
-            29279.93,
-            29277.06,
-            29276.26,
-            29276.19,
-            29277.28,
-            29279.06,
-            29276.19,
-            29277.8,
-        ],
-        "close": [
-            29292.5,
-            29292.27,
-            29293.33,
-            29294.28,
-            29294.95,
-            29292.46,
-            29290.84,
-            29289.34,
-            29286.03,
-            29282.85,
-            29284.1,
-            29285.1,
-            29287.42,
-            29290.59,
-            29285.53,
-            29281.73,
-            29279.93,
-            29277.06,
-            29276.26,
-            29277.27,
-            29278.46,
-            29279.97,
-            29279.42,
-            29277.8,
-        ],
-        "type": "candlestick",
-        "name": "Candlestick Chart",
-    },
-    "layout": {
-        "title": "Bars",
-        "xaxis": {
-            "title": "Index",
-            "tick_vals": [
-                0,
-                1,
-                2,
-                3,
-                4,
-                5,
-                6,
-                7,
-                8,
-                9,
-                10,
-                11,
-                12,
-                13,
-                14,
-                15,
-                16,
-                17,
-                18,
-                19,
-                20,
-                21,
-                22,
-                23,
-            ],
-        },
-        "yaxis": {
-            "title": "Price",
-        },
-    },
-}
+app = FastAPI()
 
 
-@app.route("/")
-async def homepage(data):
-    return JSONResponse({"msg": "this is the data service"})
+@app.websocket("/ws")
+async def websocket(websocket: WebSocket):
+    await websocket.accept()
+    while True:
+        binance = Binance()
+        df = await binance.pull_data()
+        await binance.close()
 
+        df = BarMaker.create_imbalance_bars(df, "tick_dir", 5).rename(
+            {"tick_dir_imbal_bar_id": "x"}
+        )
+        vals = df_to_dict(df, sort="x")
 
-@app.route("/tick_imbal")
-async def tick_imbal(data):
-    return JSONResponse(test_tick_bars)
+        await websocket.send_json(
+            {
+                "bars": {
+                    **vals,
+                    "type": "candlestick",
+                    "name": "Candlestick Chart",
+                },
+                "layout": {
+                    "title": "Bars",
+                    "xaxis": {"title": "Index", "tick_vals": vals["x"]},
+                    "yaxis": {
+                        "title": "Price",
+                    },
+                },
+            }
+        )
+        # await websocket.send_json(x)
