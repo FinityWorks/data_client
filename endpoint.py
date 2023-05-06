@@ -1,9 +1,14 @@
+import time
+
 from fastapi import FastAPI, WebSocket
 from fin_tools.aggregations import BarMaker
 from fin_tools.clients import Binance
 from fin_tools.formatting import df_to_dict
 
 app = FastAPI()
+
+
+barmaker = BarMaker(bar_length_limit=50, imbal_limit=10)
 
 
 @app.websocket("/ws")
@@ -14,10 +19,8 @@ async def websocket(websocket: WebSocket):
         df = await binance.pull_data()
         await binance.close()
 
-        df = BarMaker.create_imbalance_bars(df, "tick_dir", 5).rename(
-            {"tick_dir_imbal_bar_id": "x"}
-        )
-        vals = df_to_dict(df, sort="x")
+        barmaker.update_bars(df)
+        vals = df_to_dict(barmaker.bars, "tick_dir_imbal_bar_id")
 
         await websocket.send_json(
             {
@@ -28,11 +31,11 @@ async def websocket(websocket: WebSocket):
                 },
                 "layout": {
                     "title": "Bars",
-                    "xaxis": {"title": "Index", "tick_vals": vals["x"]},
+                    "xaxis": {"title": "Index", "tick_vals": vals["tick_dir_imbal_bar_id"]},
                     "yaxis": {
                         "title": "Price",
                     },
                 },
             }
         )
-        # await websocket.send_json(x)
+        time.sleep(1)
